@@ -40,6 +40,7 @@ export default function Home() {
   const [quoteIdx, setQuoteIdx] = useState(0)
   const [showSuccess, setShowSuccess] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [submitStatus, setSubmitStatus] = useState('')
   const [successData, setSuccessData] = useState({})
   const [formData, setFormData] = useState({
     name: '', phone: '', college: '', year: '', text: '', topic: 'Placement rejections', calltime: 'afternoon'
@@ -52,13 +53,11 @@ export default function Home() {
     return () => window.removeEventListener('scroll', onScroll)
   }, [])
 
-  // Quote rotation
   useEffect(() => {
     const t = setInterval(() => setQuoteIdx(i => (i + 1) % QUOTES.length), 5000)
     return () => clearInterval(t)
   }, [])
 
-  // Scroll reveal
   useEffect(() => {
     const obs = new IntersectionObserver(entries => {
       entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible') })
@@ -69,51 +68,95 @@ export default function Home() {
 
   const addReveal = el => { if (el && !revealRefs.current.includes(el)) revealRefs.current.push(el) }
 
+  // ── HANDLE SUBMIT WITH BERT API ──
   const handleSubmit = async (e) => {
-  e.preventDefault()
-  setSubmitting(true)
+    e.preventDefault()
+    setSubmitting(true)
+    setSubmitStatus('🧠 Analyzing with BERT AI…')
 
-  const text = formData.text
-  const hasUrgent = /hopeless|can't|cannot|give up|end|failed|rejected|worthless|alone|nobody/i.test(text)
-  const wc = text.split(/\s+/).length
-  const priority = hasUrgent ? 'Urgent' : wc > 50 ? 'High' : 'Medium'
+    try {
+      // ── STEP 1: Call BERT + XGBoost API ──
+      let aiResult = null
+      try {
+        const response = await fetch('http://127.0.0.1:8000/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: formData.text,
+            name: formData.name,
+            college: formData.college,
+            topic: formData.topic,
+          }),
+        })
+        if (response.ok) {
+          aiResult = await response.json()
+          setSubmitStatus('✅ AI analysis complete! Saving…')
+        }
+      } catch (apiErr) {
+        console.warn('AI API unavailable, using fallback scoring')
+        setSubmitStatus('💾 Saving your submission…')
+      }
 
-  try {
-    const { db } = await import('@/lib/firebase')
-    const { collection, addDoc, serverTimestamp } = await import('firebase/firestore')
+      // ── STEP 2: Fallback scoring if API is down ──
+      const text = formData.text
+      const hasUrgent = /hopeless|can't|cannot|give up|end|failed|rejected|worthless|alone|nobody/i.test(text)
+      const wc = text.split(/\s+/).length
+      const fallbackPriority = hasUrgent ? 'Urgent' : wc > 50 ? 'High' : 'Medium'
+      const fallbackScore = hasUrgent
+        ? 90 + Math.floor(Math.random() * 10)
+        : wc > 50
+        ? 60 + Math.floor(Math.random() * 20)
+        : 20 + Math.floor(Math.random() * 30)
 
-    await addDoc(collection(db, 'submissions'), {
-      name: formData.name,
-      phone: formData.phone,
-      college: formData.college,
-      year: formData.year,
-      text: formData.text,
-      topic: formData.topic,
-      calltime: formData.calltime,
-      mood: selectedMood,
-      priority: priority,
-      status: 'new',
-      score: hasUrgent ? 90 + Math.floor(Math.random() * 10) : wc > 50 ? 60 + Math.floor(Math.random() * 20) : 20 + Math.floor(Math.random() * 30),
-      submittedAt: serverTimestamp(),
-    })
+      const priority = aiResult?.priority || fallbackPriority
+      const score = aiResult?.score || fallbackScore
 
-    setSuccessData({
-      name: formData.name,
-      college: formData.college.split('—')[0].trim(),
-      priority,
-      mood: selectedMood
-    })
-    setShowSuccess(true)
-    setFormData({ name: '', phone: '', college: '', year: '', text: '', topic: 'Placement rejections', calltime: 'afternoon' })
-    setSelectedMood('')
+      // ── STEP 3: Save to Firestore with real AI scores ──
+      const { db } = await import('@/lib/firebase')
+      const { collection, addDoc, serverTimestamp } = await import('firebase/firestore')
 
-  } catch (err) {
-    console.error('Submission failed:', err)
-    alert('Something went wrong. Please try again.')
-  } finally {
-    setSubmitting(false)
+      await addDoc(collection(db, 'submissions'), {
+        name: formData.name,
+        phone: formData.phone,
+        college: formData.college,
+        year: formData.year,
+        text: formData.text,
+        topic: formData.topic,
+        calltime: formData.calltime,
+        mood: selectedMood,
+        priority: priority,
+        status: 'new',
+        score: score,
+        // Real BERT emotion scores
+        distress_level: aiResult?.distress_level || null,
+        urgency: aiResult?.urgency || null,
+        isolation_risk: aiResult?.isolation_risk || null,
+        confidence: aiResult?.confidence || null,
+        emotions: aiResult?.emotions || null,
+        ai_analyzed: aiResult !== null,
+        submittedAt: serverTimestamp(),
+      })
+
+      // ── STEP 4: Show success ──
+      setSuccessData({
+        name: formData.name,
+        college: formData.college.split('—')[0].trim(),
+        priority,
+        score,
+        aiAnalyzed: aiResult !== null,
+      })
+      setShowSuccess(true)
+      setFormData({ name: '', phone: '', college: '', year: '', text: '', topic: 'Placement rejections', calltime: 'afternoon' })
+      setSelectedMood('')
+
+    } catch (err) {
+      console.error('Submission failed:', err)
+      alert('Something went wrong. Please try again.')
+    } finally {
+      setSubmitting(false)
+      setSubmitStatus('')
+    }
   }
-}
 
   return (
     <div style={{ minHeight: '100vh', position: 'relative' }}>
@@ -161,7 +204,6 @@ export default function Home() {
         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
         textAlign: 'center', padding: '120px 24px 80px', overflow: 'hidden',
       }}>
-        {/* Gemini aurora mesh */}
         <div style={{
           position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none',
           background: `
@@ -172,19 +214,14 @@ export default function Home() {
             linear-gradient(160deg, #fff5f8 0%, #ffe0ee 35%, #fff2f8 60%, #ffd6e8 100%)
           `,
         }} />
-
-        {/* Luminous center orb */}
         <div style={{
           position: 'absolute', top: '25%', left: '50%', transform: 'translateX(-50%)',
           width: 600, height: 600, borderRadius: '50%', zIndex: 0,
           background: 'radial-gradient(circle, rgba(255,120,170,0.22) 0%, rgba(240,64,138,0.08) 40%, transparent 70%)',
-          filter: 'blur(40px)',
-          animation: 'glow-pulse 4s ease-in-out infinite',
-          pointerEvents: 'none',
+          filter: 'blur(40px)', animation: 'glow-pulse 4s ease-in-out infinite', pointerEvents: 'none',
         }} />
 
         <div style={{ position: 'relative', zIndex: 2, maxWidth: 820 }}>
-          {/* Badge */}
           <div className="fade-up-1" style={{
             display: 'inline-flex', alignItems: 'center', gap: 10,
             background: 'rgba(255,255,255,0.75)', border: '1px solid rgba(255,180,210,0.6)',
@@ -196,20 +233,17 @@ export default function Home() {
             For students across India · Free · Confidential
           </div>
 
-          {/* H1 */}
           <h1 className="fade-up-2" style={{
             fontFamily: 'Playfair Display, serif',
             fontSize: 'clamp(52px, 7.5vw, 96px)',
-            fontWeight: 700, lineHeight: 0.97,
-            letterSpacing: '-2.5px', marginBottom: 28,
+            fontWeight: 700, lineHeight: 0.97, letterSpacing: '-2.5px', marginBottom: 28,
           }}>
             <span style={{ display: 'block', color: '#3d2c2c' }}>Placement season</span>
             <span style={{
               display: 'block', fontStyle: 'italic',
               background: 'linear-gradient(135deg, #d4547a 0%, #f0408a 45%, #ff6ab0 80%, #e03070 100%)',
               WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
-              backgroundSize: '200% 200%',
-              animation: 'aurora-shift 6s ease infinite',
+              backgroundSize: '200% 200%', animation: 'aurora-shift 6s ease infinite',
             }}>is hard. You're not.</span>
           </h1>
 
@@ -222,24 +256,18 @@ export default function Home() {
             Share how you're feeling — a real counsellor from your college will call you back.
           </p>
 
-          {/* CTAs */}
           <div className="fade-up-4" style={{ display: 'flex', gap: 16, justifyContent: 'center', flexWrap: 'wrap' }}>
-            <button
-              onClick={() => document.getElementById('reach-out')?.scrollIntoView({ behavior: 'smooth' })}
-              className="btn-shimmer"
-              style={{
+            <button onClick={() => document.getElementById('reach-out')?.scrollIntoView({ behavior: 'smooth' })}
+              className="btn-shimmer" style={{
                 background: 'linear-gradient(135deg, #d4547a, #f0408a)',
                 color: '#fff', border: 'none', padding: '16px 40px', borderRadius: 100,
                 fontSize: 16, fontWeight: 500, fontFamily: 'DM Sans, sans-serif', cursor: 'pointer',
-                boxShadow: '0 8px 36px rgba(212,84,122,0.4)',
-                transition: 'transform 0.25s, box-shadow 0.25s',
+                boxShadow: '0 8px 36px rgba(212,84,122,0.4)', transition: 'transform 0.25s, box-shadow 0.25s',
               }}
               onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = '0 14px 48px rgba(212,84,122,0.55)' }}
               onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 8px 36px rgba(212,84,122,0.4)' }}
             >💬 Share How You Feel</button>
-
-            <button
-              onClick={() => document.getElementById('how')?.scrollIntoView({ behavior: 'smooth' })}
+            <button onClick={() => document.getElementById('how')?.scrollIntoView({ behavior: 'smooth' })}
               style={{
                 background: 'rgba(255,255,255,0.8)', color: '#3d2c2c',
                 border: '1.5px solid rgba(240,168,195,0.5)', padding: '16px 36px', borderRadius: 100,
@@ -251,7 +279,6 @@ export default function Home() {
             >How it works →</button>
           </div>
 
-          {/* Stats cards */}
           <div className="fade-up-5" style={{ display: 'flex', gap: 16, justifyContent: 'center', flexWrap: 'wrap', marginTop: 72 }}>
             {[
               { icon: '🏫', val: '50+', label: 'Colleges Supported' },
@@ -277,7 +304,6 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Scroll hint */}
         <div style={{ position: 'absolute', bottom: 36, left: '50%', transform: 'translateX(-50%)', zIndex: 2, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, color: '#b08888', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
           <div style={{ width: 22, height: 36, border: '2px solid #e8a0a0', borderRadius: 11, display: 'flex', justifyContent: 'center', paddingTop: 5 }}>
             <div className="animate-scroll-wheel" style={{ width: 3, height: 7, background: '#e8a0a0', borderRadius: 2 }} />
@@ -312,7 +338,6 @@ export default function Home() {
 
           <div className="glass-card" style={{ borderRadius: 28, padding: 48 }}>
             <form onSubmit={handleSubmit}>
-              {/* Name + Phone */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 22 }}>
                 {[
                   { id: 'name', label: 'Your Name', placeholder: 'Aarav Sharma', type: 'text' },
@@ -331,7 +356,6 @@ export default function Home() {
                 ))}
               </div>
 
-              {/* College + Year */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 22 }}>
                 <div>
                   <label style={labelStyle}>College / University</label>
@@ -349,7 +373,6 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Mood */}
               <div style={{ marginBottom: 22 }}>
                 <label style={labelStyle}>How are you feeling right now?</label>
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 8 }}>
@@ -372,7 +395,6 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Text */}
               <div style={{ marginBottom: 22 }}>
                 <label style={labelStyle}>
                   What's on your mind? <span style={{ color: '#b08888', fontWeight: 400 }}>(Share as much or as little as you want)</span>
@@ -387,7 +409,6 @@ export default function Home() {
                 />
               </div>
 
-              {/* Topic */}
               <div style={{ marginBottom: 22 }}>
                 <label style={labelStyle}>What's this mainly about?</label>
                 <select value={formData.topic} onChange={e => setFormData(p => ({ ...p, topic: e.target.value }))} style={selectStyle}>
@@ -395,7 +416,6 @@ export default function Home() {
                 </select>
               </div>
 
-              {/* Call time */}
               <div style={{ marginBottom: 28 }}>
                 <label style={labelStyle}>Best time to call you?</label>
                 <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 8 }}>
@@ -409,17 +429,31 @@ export default function Home() {
                 </div>
               </div>
 
+              {/* AI STATUS while submitting */}
+              {submitting && submitStatus && (
+                <div style={{
+                  marginBottom: 14, padding: '12px 16px',
+                  background: 'rgba(212,84,122,0.06)', border: '1px solid #f9d0d0',
+                  borderRadius: 12, fontSize: 13, color: '#d4547a',
+                  display: 'flex', alignItems: 'center', gap: 8,
+                }}>
+                  <span style={{ animation: 'sway 1s ease-in-out infinite', display: 'inline-block' }}>🌸</span>
+                  {submitStatus}
+                </div>
+              )}
+
               <button type="submit" disabled={submitting} className="btn-shimmer" style={{
                 width: '100%', background: 'linear-gradient(135deg, #d4547a, #f0408a)',
                 color: '#fff', border: 'none', padding: 16, borderRadius: 14,
-                fontFamily: 'DM Sans, sans-serif', fontSize: 16, fontWeight: 500, cursor: submitting ? 'not-allowed' : 'pointer',
+                fontFamily: 'DM Sans, sans-serif', fontSize: 16, fontWeight: 500,
+                cursor: submitting ? 'not-allowed' : 'pointer',
                 boxShadow: '0 6px 28px rgba(212,84,122,0.38)', opacity: submitting ? 0.7 : 1,
                 transition: 'transform 0.2s, box-shadow 0.2s',
               }}
                 onMouseEnter={e => !submitting && (e.currentTarget.style.transform = 'translateY(-2px)')}
                 onMouseLeave={e => (e.currentTarget.style.transform = 'translateY(0)')}
               >
-                {submitting ? 'Sending… 🌸' : '🌸 Submit — Someone Will Reach Out'}
+                {submitting ? 'Analyzing & Saving… 🌸' : '🌸 Submit — Someone Will Reach Out'}
               </button>
               <p style={{ textAlign: 'center', fontSize: 12, color: '#b08888', marginTop: 14, lineHeight: 1.6 }}>
                 Your information is completely confidential. Only your college counsellor can see this.
@@ -478,7 +512,7 @@ export default function Home() {
       <section ref={addReveal} className="reveal" style={{ padding: '100px 56px', background: 'linear-gradient(135deg, #fde8e8 0%, #fef3f0 100%)', borderTop: '1px solid #f0d8d8', position: 'relative', zIndex: 2 }}>
         <div style={{ maxWidth: 800, margin: '0 auto', textAlign: 'center' }}>
           <span style={sectionLabelStyle}>What Students Said</span>
-          <blockquote style={{ fontFamily: 'Playfair Display, serif', fontStyle: 'italic', fontSize: 'clamp(20px, 3.5vw, 32px)', fontWeight: 400, lineHeight: 1.45, color: '#3d2c2c', margin: '36px 0 20px', letterSpacing: '-0.3px', transition: 'opacity 0.5s' }}>
+          <blockquote style={{ fontFamily: 'Playfair Display, serif', fontStyle: 'italic', fontSize: 'clamp(20px, 3.5vw, 32px)', fontWeight: 400, lineHeight: 1.45, color: '#3d2c2c', margin: '36px 0 20px', letterSpacing: '-0.3px' }}>
             "{QUOTES[quoteIdx].text}"
           </blockquote>
           <p style={{ fontSize: 13, color: '#b08888' }}>{QUOTES[quoteIdx].attr}</p>
@@ -511,13 +545,23 @@ export default function Home() {
             Your feelings have been received. A counsellor from your college will call you within 2 hours. You are <strong>not alone</strong>.
           </p>
           <div style={{ background: 'rgba(255,255,255,0.8)', border: '1px solid #f0d8d8', borderRadius: 20, padding: '20px 32px', marginBottom: 28, display: 'flex', gap: 32, flexWrap: 'wrap', justifyContent: 'center' }}>
-            {[['Your Name', successData.name], ['College', successData.college], ['Priority', successData.priority + ' Priority']].map(([k, v]) => (
+            {[
+              ['Your Name', successData.name],
+              ['College', successData.college],
+              ['Priority', successData.priority + ' Priority'],
+              ['AI Score', successData.score + '/100'],
+            ].map(([k, v]) => (
               <div key={k} style={{ textAlign: 'center' }}>
                 <div style={{ fontFamily: 'Playfair Display, serif', fontSize: 20, fontWeight: 600, color: '#d4547a' }}>{v}</div>
                 <div style={{ fontSize: 12, color: '#b08888', marginTop: 4 }}>{k}</div>
               </div>
             ))}
           </div>
+          {successData.aiAnalyzed && (
+            <div style={{ marginBottom: 20, fontSize: 13, color: '#5a9e7a', background: 'rgba(90,158,122,0.08)', border: '1px solid rgba(90,158,122,0.2)', borderRadius: 10, padding: '8px 18px' }}>
+              🧠 Analyzed by BERT + XGBoost AI
+            </div>
+          )}
           <button onClick={() => setShowSuccess(false)} style={{ background: 'linear-gradient(135deg, #d4547a, #f0408a)', color: '#fff', border: 'none', padding: '14px 36px', borderRadius: 100, fontSize: 16, fontFamily: 'DM Sans, sans-serif', cursor: 'pointer', boxShadow: '0 6px 24px rgba(212,84,122,0.35)' }}>
             ← Go Back
           </button>
@@ -527,7 +571,6 @@ export default function Home() {
   )
 }
 
-// Shared style objects
 const inputStyle = {
   width: '100%', background: 'rgba(253,248,244,0.8)', border: '1.5px solid #f0d8d8',
   borderRadius: 14, color: '#3d2c2c', fontFamily: 'DM Sans, sans-serif', fontSize: 15,

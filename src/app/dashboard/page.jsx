@@ -325,7 +325,12 @@ export default function Dashboard() {
 
                 <Dlabel>AI Sentiment Analysis</Dlabel>
                 <div style={{ background: '#fef3f0', border: '1.5px solid #f0d8d8', borderRadius: 14, padding: 16, marginBottom: 18 }}>
-                  {[['Distress Level', selected.d, '#d4547a'], ['Urgency', selected.u, '#e8804a'], ['Isolation Risk', selected.iso, '#d4a054'], ['Confidence', selected.conf, '#5a9e7a']].map(([k, v, c]) => (
+                  {[
+                    ['Distress Level', selected.distress_level || selected.d || 0, '#d4547a'],
+                    ['Urgency', selected.urgency || selected.u || 0, '#e8804a'],
+                    ['Isolation Risk', selected.isolation_risk || selected.iso || 0, '#d4a054'],
+                    ['Confidence', selected.confidence || selected.conf || 0, '#5a9e7a']
+                  ].map(([k, v, c]) => (
                     <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
                       <span style={{ fontSize: 12, color: '#b08888', width: 110, flexShrink: 0 }}>{k}</span>
                       <div style={{ flex: 1, height: 5, background: 'rgba(212,84,122,0.1)', borderRadius: 100, overflow: 'hidden' }}>
