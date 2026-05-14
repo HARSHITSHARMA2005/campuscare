@@ -5,6 +5,7 @@ import Link from 'next/link'
 
 const PetalCanvas = dynamic(() => import('@/components/PetalCanvas'), { ssr: false })
 const Clouds = dynamic(() => import('@/components/Clouds'), { ssr: false })
+const FloatingLogos = dynamic(() => import('@/components/FloatingLogos'), { ssr: false })
 
 const STRIP_ITEMS = [
   '🌸 Confidential & Safe', '💬 Real Human Support', '🧠 AI-Powered Priority',
@@ -68,7 +69,7 @@ export default function Home() {
 
   const addReveal = el => { if (el && !revealRefs.current.includes(el)) revealRefs.current.push(el) }
 
-  // ── HANDLE SUBMIT WITH BERT API ──
+  // ── HANDLE SUBMIT WITH BERT API + GMAIL ALERT ──
   const handleSubmit = async (e) => {
     e.preventDefault()
     setSubmitting(true)
@@ -112,6 +113,7 @@ export default function Home() {
       const score = aiResult?.score || fallbackScore
 
       // ── STEP 3: Save to Firestore with real AI scores ──
+      setSubmitStatus('💾 Saving to database…')
       const { db } = await import('@/lib/firebase')
       const { collection, addDoc, serverTimestamp } = await import('firebase/firestore')
 
@@ -127,7 +129,6 @@ export default function Home() {
         priority: priority,
         status: 'new',
         score: score,
-        // Real BERT emotion scores
         distress_level: aiResult?.distress_level || null,
         urgency: aiResult?.urgency || null,
         isolation_risk: aiResult?.isolation_risk || null,
@@ -137,13 +138,42 @@ export default function Home() {
         submittedAt: serverTimestamp(),
       })
 
-      // ── STEP 4: Show success ──
+      // ── STEP 4: Send Gmail alert for Urgent/High priority ──
+      if (priority === 'Urgent' || priority === 'High') {
+        setSubmitStatus('📧 Alerting counsellor…')
+        try {
+          await fetch('http://127.0.0.1:8000/send-email', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: formData.name,
+              phone: formData.phone,
+              college: formData.college,
+              topic: formData.topic,
+              priority: priority,
+              score: score,
+              mood: selectedMood,
+              text: formData.text,
+              year: formData.year,
+              calltime: formData.calltime,
+            }),
+          })
+          setSubmitStatus('✅ Counsellor has been notified!')
+          console.log('✅ Gmail alert sent!')
+        } catch (emailErr) {
+          console.warn('Email alert failed:', emailErr)
+          // Don't block submission if email fails
+        }
+      }
+
+      // ── STEP 5: Show success overlay ──
       setSuccessData({
         name: formData.name,
         college: formData.college.split('—')[0].trim(),
         priority,
         score,
         aiAnalyzed: aiResult !== null,
+        emailSent: priority === 'Urgent' || priority === 'High',
       })
       setShowSuccess(true)
       setFormData({ name: '', phone: '', college: '', year: '', text: '', topic: 'Placement rejections', calltime: 'afternoon' })
@@ -220,6 +250,8 @@ export default function Home() {
           background: 'radial-gradient(circle, rgba(255,120,170,0.22) 0%, rgba(240,64,138,0.08) 40%, transparent 70%)',
           filter: 'blur(40px)', animation: 'glow-pulse 4s ease-in-out infinite', pointerEvents: 'none',
         }} />
+
+        <FloatingLogos />
 
         <div style={{ position: 'relative', zIndex: 2, maxWidth: 820 }}>
           <div className="fade-up-1" style={{
@@ -544,7 +576,7 @@ export default function Home() {
           <p style={{ fontSize: 18, color: '#7a5c5c', fontWeight: 300, maxWidth: 500, lineHeight: 1.7, marginBottom: 36 }}>
             Your feelings have been received. A counsellor from your college will call you within 2 hours. You are <strong>not alone</strong>.
           </p>
-          <div style={{ background: 'rgba(255,255,255,0.8)', border: '1px solid #f0d8d8', borderRadius: 20, padding: '20px 32px', marginBottom: 28, display: 'flex', gap: 32, flexWrap: 'wrap', justifyContent: 'center' }}>
+          <div style={{ background: 'rgba(255,255,255,0.8)', border: '1px solid #f0d8d8', borderRadius: 20, padding: '20px 32px', marginBottom: 20, display: 'flex', gap: 32, flexWrap: 'wrap', justifyContent: 'center' }}>
             {[
               ['Your Name', successData.name],
               ['College', successData.college],
@@ -557,11 +589,21 @@ export default function Home() {
               </div>
             ))}
           </div>
-          {successData.aiAnalyzed && (
-            <div style={{ marginBottom: 20, fontSize: 13, color: '#5a9e7a', background: 'rgba(90,158,122,0.08)', border: '1px solid rgba(90,158,122,0.2)', borderRadius: 10, padding: '8px 18px' }}>
-              🧠 Analyzed by BERT + XGBoost AI
-            </div>
-          )}
+
+          {/* Badges */}
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center', marginBottom: 28 }}>
+            {successData.aiAnalyzed && (
+              <div style={{ fontSize: 13, color: '#5a9e7a', background: 'rgba(90,158,122,0.08)', border: '1px solid rgba(90,158,122,0.2)', borderRadius: 10, padding: '8px 16px' }}>
+                🧠 Analyzed by BERT + XGBoost
+              </div>
+            )}
+            {successData.emailSent && (
+              <div style={{ fontSize: 13, color: '#d4547a', background: 'rgba(212,84,122,0.08)', border: '1px solid rgba(212,84,122,0.2)', borderRadius: 10, padding: '8px 16px' }}>
+                📧 Counsellor has been notified
+              </div>
+            )}
+          </div>
+
           <button onClick={() => setShowSuccess(false)} style={{ background: 'linear-gradient(135deg, #d4547a, #f0408a)', color: '#fff', border: 'none', padding: '14px 36px', borderRadius: 100, fontSize: 16, fontFamily: 'DM Sans, sans-serif', cursor: 'pointer', boxShadow: '0 6px 24px rgba(212,84,122,0.35)' }}>
             ← Go Back
           </button>

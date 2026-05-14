@@ -22,20 +22,17 @@ export default function Dashboard() {
   const [officialName, setOfficialName] = useState('Official')
   const [officialInitials, setOfficialInitials] = useState('CC')
 
-  // ── CLOCK ──
   useEffect(() => {
     const t = setInterval(() => setClock(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' IST'), 1000)
     return () => clearInterval(t)
   }, [])
 
-  // ── CALL TIMER ──
   useEffect(() => {
     let t
     if (calling) { t = setInterval(() => setCallSecs(s => s + 1), 1000) }
     return () => clearInterval(t)
   }, [calling])
 
-  // ── GET LOGGED IN OFFICIAL NAME ──
   useEffect(() => {
     const getUser = async () => {
       const { auth } = await import('@/lib/firebase')
@@ -51,29 +48,24 @@ export default function Dashboard() {
     getUser()
   }, [])
 
-  // ── FETCH REAL DATA FROM FIRESTORE ──
   useEffect(() => {
     let unsubscribe
     const fetchData = async () => {
       try {
         const { db } = await import('@/lib/firebase')
         const { collection, onSnapshot, orderBy, query } = await import('firebase/firestore')
-
         const q = query(collection(db, 'submissions'), orderBy('submittedAt', 'desc'))
-
         unsubscribe = onSnapshot(q, (snapshot) => {
           const data = snapshot.docs.map(doc => ({
             id: doc.id,
             ...doc.data(),
-            // Format time
             time: doc.data().submittedAt?.toDate().toLocaleString('en-IN', {
               hour: '2-digit', minute: '2-digit', day: '2-digit', month: 'short'
             }) || 'Just now',
-            // AI bars — placeholder until BERT is connected
-            d: doc.data().score || 50,
-            u: Math.min(100, (doc.data().score || 50) + 5),
-            iso: Math.max(0, (doc.data().score || 50) - 10),
-            conf: 85 + Math.floor(Math.random() * 12),
+            d: doc.data().distress_level || doc.data().score || 50,
+            u: doc.data().urgency || Math.min(100, (doc.data().score || 50) + 5),
+            iso: doc.data().isolation_risk || Math.max(0, (doc.data().score || 50) - 10),
+            conf: doc.data().confidence || 85,
           }))
           setStudents(data)
           setLoadingData(false)
@@ -87,7 +79,6 @@ export default function Dashboard() {
     return () => { if (unsubscribe) unsubscribe() }
   }, [])
 
-  // ── SIGN OUT ──
   const handleSignOut = async () => {
     const { auth } = await import('@/lib/firebase')
     const { signOut } = await import('firebase/auth')
@@ -98,20 +89,17 @@ export default function Dashboard() {
   const showToast = (msg) => { setToast({ show: true, msg }); setTimeout(() => setToast({ show: false, msg: '' }), 3000) }
   const fmt = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
 
-  // ── FILTER & SEARCH ──
   const filtered = students.filter(s => {
     const mf = filterVal === 'all' || (filterVal === 'resolved' ? s.status === 'resolved' : s.priority === filterVal)
     const sf = !searchVal || s.name?.toLowerCase().includes(searchVal) || s.college?.toLowerCase().includes(searchVal) || s.topic?.toLowerCase().includes(searchVal)
     return mf && sf
   })
 
-  // ── STATS ──
   const totalEntries = students.length
   const urgentHigh = students.filter(s => s.priority === 'Urgent' || s.priority === 'High').length
   const avgScore = students.length ? Math.round(students.reduce((a, b) => a + (b.score || 0), 0) / students.length) : 0
   const resolved = students.filter(s => s.status === 'resolved').length
 
-  // ── MARK RESOLVED IN FIRESTORE ──
   const markResolved = async () => {
     if (!selected) return
     try {
@@ -125,19 +113,25 @@ export default function Dashboard() {
     }
   }
 
-  // ── CALL ──
-  const startCall = () => { setCalling(true); setCallSecs(0) }
+  const startCall = () => {
+    if (selected?.phone) {
+      const cleanPhone = selected.phone.replace(/\s+/g, '')
+      window.location.href = `tel:${cleanPhone}`
+    }
+    setCalling(true)
+    setCallSecs(0)
+  }
+
   const endCall = async () => {
     setCalling(false)
     const dur = fmt(callSecs)
-    setCallLog(l => [{ text: `Called by you — ${dur}`, time: 'just now' }, ...l])
+    setCallLog(l => [{ text: `Called ${selected?.name} — ${dur}`, time: 'just now' }, ...l])
     setCallModal(false)
     showToast(`📞 Call ended · ${dur}`)
-    // Save call log to Firestore
     if (selected) {
       try {
         const { db } = await import('@/lib/firebase')
-        const { doc, updateDoc, arrayUnion, serverTimestamp } = await import('firebase/firestore')
+        const { doc, updateDoc, arrayUnion } = await import('firebase/firestore')
         await updateDoc(doc(db, 'submissions', selected.id), {
           callLog: arrayUnion({ duration: dur, calledAt: new Date().toISOString() }),
           status: 'progress'
@@ -205,7 +199,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* STATS — now real data */}
+        {/* STATS */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', borderBottom: '1px solid #f0d8d8', flexShrink: 0, background: 'rgba(255,255,255,0.75)' }}>
           {[
             ['Total Entries', String(totalEntries), '↑ Live', '#d4547a', false],
@@ -244,7 +238,6 @@ export default function Dashboard() {
               </select>
             </div>
 
-            {/* LOADING STATE */}
             {loadingData ? (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 300, gap: 16 }}>
                 <div style={{ fontSize: 40, animation: 'sway 2s ease-in-out infinite' }}>🌸</div>
@@ -283,7 +276,7 @@ export default function Dashboard() {
                           </div>
                         </td>
                         <td style={tdStyle(isSel)}>
-                          <div style={{ fontSize: 15 }}>{s.mood} <span style={{ fontSize: 13, color: '#7a5c5c' }}>{s.mood}</span></div>
+                          <div style={{ fontSize: 15 }}>{s.mood}</div>
                           <div style={{ fontSize: 11, color: '#b08888', marginTop: 2 }}>{s.topic}</div>
                         </td>
                         <td style={{ ...tdStyle(isSel), fontSize: 13, color: '#7a5c5c' }}>{s.college}</td>
@@ -316,6 +309,9 @@ export default function Dashboard() {
                   <span style={{ display: 'inline-flex', alignItems: 'center', padding: '4px 10px', borderRadius: 100, fontSize: 11, fontWeight: 600, background: (PC[selected.priority] || PC['Medium']).bg, color: (PC[selected.priority] || PC['Medium']).color, border: `1px solid ${(PC[selected.priority] || PC['Medium']).border}` }}>{selected.priority}</span>
                   <span style={{ fontSize: 12, color: '#b08888' }}>Score: <strong style={{ color: (PC[selected.priority] || PC['Medium']).color }}>{selected.score}</strong></span>
                   <span style={{ fontSize: 12, color: '#b08888' }}>{selected.time}</span>
+                  {selected.ai_analyzed && (
+                    <span style={{ fontSize: 11, color: '#5a9e7a', background: 'rgba(90,158,122,0.08)', border: '1px solid rgba(90,158,122,0.2)', borderRadius: 100, padding: '3px 8px' }}>🧠 BERT Analyzed</span>
+                  )}
                 </div>
               </div>
 
@@ -336,12 +332,21 @@ export default function Dashboard() {
                       <div style={{ flex: 1, height: 5, background: 'rgba(212,84,122,0.1)', borderRadius: 100, overflow: 'hidden' }}>
                         <div style={{ height: '100%', width: (v || 0) + '%', background: c, borderRadius: 100, transition: 'width 1s ease' }} />
                       </div>
-                      <span style={{ fontSize: 12, fontWeight: 500, minWidth: 34, textAlign: 'right', fontFamily: 'Playfair Display, serif' }}>{v || 0}%</span>
+                      <span style={{ fontSize: 12, fontWeight: 500, minWidth: 34, textAlign: 'right', fontFamily: 'Playfair Display, serif' }}>{Math.round(v || 0)}%</span>
                     </div>
                   ))}
-                  <div style={{ marginTop: 10, padding: '8px 12px', background: 'rgba(212,84,122,0.05)', borderRadius: 8, fontSize: 11, color: '#b08888', textAlign: 'center' }}>
-                    🧠 BERT + XGBoost analysis coming in next update
-                  </div>
+                  {selected.emotions && (
+                    <div style={{ marginTop: 12, padding: '10px 12px', background: 'rgba(90,158,122,0.05)', borderRadius: 10, border: '1px solid rgba(90,158,122,0.15)' }}>
+                      <div style={{ fontSize: 10, color: '#5a9e7a', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8, fontWeight: 500 }}>BERT Emotion Breakdown</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                        {Object.entries(selected.emotions).sort(([,a],[,b]) => b-a).slice(0,4).map(([emotion, score]) => (
+                          <span key={emotion} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 100, background: 'rgba(212,84,122,0.08)', color: '#d4547a', border: '1px solid rgba(212,84,122,0.15)' }}>
+                            {emotion}: {Math.round(score)}%
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <Dlabel>Contact Details</Dlabel>
@@ -369,7 +374,11 @@ export default function Dashboard() {
               </div>
 
               <div style={{ padding: '14px 18px', borderTop: '1px solid #f0d8d8', display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0 }}>
-                <button onClick={() => { setCallModal(true); setCalling(false); setCallSecs(0) }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: 'linear-gradient(135deg,#d4547a,#f0408a)', color: '#fff', border: 'none', padding: 13, borderRadius: 13, fontFamily: 'DM Sans,sans-serif', fontSize: 14, fontWeight: 500, cursor: 'pointer', boxShadow: '0 6px 20px rgba(212,84,122,0.35)' }}>📞 Call Student Now</button>
+                <button
+                  onClick={() => { setCallModal(true); setCalling(false); setCallSecs(0) }}
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: 'linear-gradient(135deg,#d4547a,#f0408a)', color: '#fff', border: 'none', padding: 13, borderRadius: 13, fontFamily: 'DM Sans,sans-serif', fontSize: 14, fontWeight: 500, cursor: 'pointer', boxShadow: '0 6px 20px rgba(212,84,122,0.35)' }}>
+                  📞 Call Student Now
+                </button>
                 <div style={{ display: 'flex', gap: 8 }}>
                   {[['✅ Resolve', markResolved], ['📝 Note', () => showToast('📝 Note saved')], ['🔴 Escalate', () => showToast('🔴 Escalated to admin')]].map(([label, fn]) => (
                     <button key={label} onClick={fn} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, background: '#fef3f0', border: '1.5px solid #f0d8d8', color: '#7a5c5c', padding: 9, borderRadius: 11, fontFamily: 'DM Sans,sans-serif', fontSize: 13, cursor: 'pointer' }}>{label}</button>
@@ -418,36 +427,79 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* CALL MODAL */}
+      {/* ── CALL MODAL ── */}
       {callModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(253,232,232,0.75)', backdropFilter: 'blur(14px)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: '#fff', border: '1.5px solid #f0d8d8', borderRadius: 24, width: 360, padding: 36, position: 'relative', boxShadow: '0 20px 60px rgba(212,84,122,0.18)' }}>
+          <div style={{ background: '#fff', border: '1.5px solid #f0d8d8', borderRadius: 24, width: 380, padding: 36, position: 'relative', boxShadow: '0 20px 60px rgba(212,84,122,0.18)' }}>
             <button onClick={() => { setCallModal(false); setCalling(false) }} style={{ position: 'absolute', top: 16, right: 16, background: 'none', border: 'none', fontSize: 18, color: '#b08888', cursor: 'pointer' }}>✕</button>
-            <div style={{ width: 80, height: 80, borderRadius: '50%', background: 'linear-gradient(135deg,#d4547a,#e8a0a0)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, margin: '0 auto 20px' }}>🌸</div>
+
             {!calling ? (
               <>
-                <h3 style={{ fontFamily: 'Playfair Display,serif', fontSize: 22, fontWeight: 600, color: '#3d2c2c', textAlign: 'center', marginBottom: 4 }}>{selected?.name}</h3>
-                <p style={{ fontSize: 13, color: '#7a5c5c', textAlign: 'center', marginBottom: 22 }}>{selected?.topic}</p>
-                {[['📱 Phone', selected?.phone], ['🏫 College', selected?.college], ['🏷️ Priority', `${selected?.score}/100 — ${selected?.priority}`], ['😔 Mood', selected?.mood]].map(([k, v]) => (
-                  <div key={k} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: '#fef3f0', borderRadius: 10, marginBottom: 8, fontSize: 13 }}>
+                {/* PRE-CALL STATE */}
+                <div style={{ width: 72, height: 72, borderRadius: '50%', background: 'linear-gradient(135deg,#d4547a,#e8a0a0)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, margin: '0 auto 16px' }}>🌸</div>
+                <h3 style={{ fontFamily: 'Playfair Display,serif', fontSize: 20, fontWeight: 600, color: '#3d2c2c', textAlign: 'center', marginBottom: 4 }}>{selected?.name}</h3>
+                <p style={{ fontSize: 13, color: '#7a5c5c', textAlign: 'center', marginBottom: 20 }}>{selected?.topic}</p>
+
+                {[['📱 Phone', selected?.phone], ['🏫 College', selected?.college], ['🏷️ Priority', `${selected?.score}/100 — ${selected?.priority}`], ['😔 Mood', selected?.mood], ['🕐 Best Time', selected?.calltime]].map(([k, v]) => (
+                  <div key={k} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 14px', background: '#fef3f0', borderRadius: 10, marginBottom: 6, fontSize: 13 }}>
                     <span style={{ color: '#b08888' }}>{k}</span>
                     <span style={{ fontWeight: 500, color: '#3d2c2c' }}>{v}</span>
                   </div>
                 ))}
-                <button onClick={startCall} style={{ width: '100%', background: 'linear-gradient(135deg,#d4547a,#f0408a)', color: '#fff', border: 'none', padding: 14, borderRadius: 13, fontFamily: 'DM Sans,sans-serif', fontSize: 15, fontWeight: 500, cursor: 'pointer', marginTop: 16, boxShadow: '0 6px 24px rgba(212,84,122,0.35)' }}>📞 Start Call</button>
+
+                {/* CALL BUTTON — opens phone dialer */}
+                <a
+                  href={`tel:${selected?.phone?.replace(/\s+/g, '')}`}
+                  onClick={() => { startCall() }}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+                    width: '100%', background: 'linear-gradient(135deg,#d4547a,#f0408a)',
+                    color: '#fff', textDecoration: 'none', padding: 14, borderRadius: 13,
+                    fontFamily: 'DM Sans,sans-serif', fontSize: 15, fontWeight: 500,
+                    marginTop: 14, boxShadow: '0 6px 24px rgba(212,84,122,0.35)',
+                    transition: 'transform 0.2s, box-shadow 0.2s',
+                    boxSizing: 'border-box',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 10px 32px rgba(212,84,122,0.45)' }}
+                  onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 6px 24px rgba(212,84,122,0.35)' }}
+                >
+                  📞 Call {selected?.phone}
+                </a>
+                <p style={{ textAlign: 'center', fontSize: 11, color: '#b08888', marginTop: 10 }}>
+                  Opens your phone dialer automatically
+                </p>
               </>
             ) : (
-              <div style={{ textAlign: 'center' }}>
-                <h3 style={{ fontFamily: 'Playfair Display,serif', fontSize: 22, fontWeight: 600, marginBottom: 4 }}>Calling…</h3>
-                <p style={{ fontSize: 13, color: '#7a5c5c', marginBottom: 14 }}>{selected?.name}</p>
-                <div style={{ display: 'flex', gap: 4, justifyContent: 'center', margin: '10px 0' }}>
-                  {[0, 0.15, 0.3].map((d, i) => <span key={i} style={{ width: 7, height: 7, borderRadius: '50%', background: '#d4547a', display: 'inline-block', animation: `dot-bounce 0.8s ${d}s ease-in-out infinite` }} />)}
+              <>
+                {/* IN-CALL STATE */}
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ width: 72, height: 72, borderRadius: '50%', background: 'linear-gradient(135deg,#5a9e7a,#3d8a62)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, margin: '0 auto 16px', animation: 'glow-pulse 2s ease-in-out infinite' }}>📞</div>
+                  <h3 style={{ fontFamily: 'Playfair Display,serif', fontSize: 20, fontWeight: 600, marginBottom: 4 }}>Call in Progress</h3>
+                  <p style={{ fontSize: 13, color: '#7a5c5c', marginBottom: 16 }}>{selected?.name} · {selected?.phone}</p>
+
+                  <div style={{ display: 'flex', gap: 4, justifyContent: 'center', margin: '10px 0' }}>
+                    {[0, 0.15, 0.3].map((d, i) => (
+                      <span key={i} style={{ width: 7, height: 7, borderRadius: '50%', background: '#5a9e7a', display: 'inline-block', animation: `dot-bounce 0.8s ${d}s ease-in-out infinite` }} />
+                    ))}
+                  </div>
+
+                  <div style={{ margin: '16px 0', padding: '14px', background: '#fef3f0', borderRadius: 12, fontSize: 14 }}>
+                    <div style={{ fontSize: 11, color: '#b08888', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Call Duration</div>
+                    <div style={{ fontFamily: 'Playfair Display,serif', fontWeight: 600, fontSize: 32, color: '#d4547a' }}>{fmt(callSecs)}</div>
+                  </div>
+
+                  <div style={{ background: 'rgba(212,84,122,0.05)', border: '1px solid rgba(212,84,122,0.15)', borderRadius: 10, padding: '12px 14px', marginBottom: 16, textAlign: 'left' }}>
+                    <div style={{ fontSize: 11, color: '#d4547a', fontWeight: 500, marginBottom: 6 }}>💡 Suggested Opening</div>
+                    <div style={{ fontSize: 12, color: '#7a5c5c', lineHeight: 1.6 }}>
+                      "Hi {selected?.name?.split(' ')[0]}, I'm calling from CampusCare at {selected?.college}. I saw your message and wanted to check in on you. How are you feeling right now?"
+                    </div>
+                  </div>
+
+                  <button onClick={endCall} style={{ width: '100%', background: 'rgba(212,84,122,0.08)', border: '1.5px solid rgba(212,84,122,0.3)', color: '#d4547a', padding: 13, borderRadius: 13, fontFamily: 'DM Sans,sans-serif', fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>
+                    📵 End Call & Save Log
+                  </button>
                 </div>
-                <div style={{ margin: '16px 0', padding: '12px', background: '#fef3f0', borderRadius: 10, fontSize: 13, color: '#7a5c5c' }}>
-                  Duration: <span style={{ fontFamily: 'Playfair Display,serif', fontWeight: 600, color: '#d4547a' }}>{fmt(callSecs)}</span>
-                </div>
-                <button onClick={endCall} style={{ width: '100%', background: 'rgba(212,84,122,0.08)', border: '1.5px solid rgba(212,84,122,0.3)', color: '#d4547a', padding: 12, borderRadius: 13, fontFamily: 'DM Sans,sans-serif', fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>📵 End Call</button>
-              </div>
+              </>
             )}
           </div>
         </div>
