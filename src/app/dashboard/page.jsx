@@ -89,24 +89,33 @@ export default function Dashboard() {
   const showToast = (msg) => { setToast({ show: true, msg }); setTimeout(() => setToast({ show: false, msg: '' }), 3000) }
   const fmt = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
 
+  // ✅ FIX 1: Filter now hides resolved entries from All/priority views
   const filtered = students.filter(s => {
-    const mf = filterVal === 'all' || (filterVal === 'resolved' ? s.status === 'resolved' : s.priority === filterVal)
+    const mf = filterVal === 'resolved'
+      ? s.status === 'resolved'
+      : s.status !== 'resolved' && (filterVal === 'all' || s.priority === filterVal)
     const sf = !searchVal || s.name?.toLowerCase().includes(searchVal) || s.college?.toLowerCase().includes(searchVal) || s.topic?.toLowerCase().includes(searchVal)
     return mf && sf
   })
 
-  const totalEntries = students.length
-  const urgentHigh = students.filter(s => s.priority === 'Urgent' || s.priority === 'High').length
+  const totalEntries = students.filter(s => s.status !== 'resolved').length
+  const urgentHigh = students.filter(s => (s.priority === 'Urgent' || s.priority === 'High') && s.status !== 'resolved').length
   const avgScore = students.length ? Math.round(students.reduce((a, b) => a + (b.score || 0), 0) / students.length) : 0
   const resolved = students.filter(s => s.status === 'resolved').length
 
+  // ✅ FIX 2: markResolved no longer deletes the document
   const markResolved = async () => {
     if (!selected) return
     try {
       const { db } = await import('@/lib/firebase')
       const { doc, updateDoc } = await import('firebase/firestore')
-      await updateDoc(doc(db, 'submissions', selected.id), { status: 'resolved' })
-      setSelected(s => ({ ...s, status: 'resolved' }))
+
+      await updateDoc(doc(db, 'submissions', selected.id), {
+        status: 'resolved',
+        resolvedAt: new Date().toISOString(),
+      })
+
+      setSelected(null)
       showToast('✅ Marked as resolved')
     } catch (err) {
       showToast('❌ Failed to update')
@@ -246,8 +255,12 @@ export default function Dashboard() {
             ) : filtered.length === 0 ? (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 300, gap: 12 }}>
                 <div style={{ fontSize: 40 }}>🌸</div>
-                <div style={{ fontSize: 15, color: '#b08888' }}>No entries yet</div>
-                <div style={{ fontSize: 13, color: '#d4c4c4' }}>Student submissions will appear here in real time</div>
+                <div style={{ fontSize: 15, color: '#b08888' }}>
+                  {filterVal === 'resolved' ? 'No resolved entries yet' : 'No active entries'}
+                </div>
+                <div style={{ fontSize: 13, color: '#d4c4c4' }}>
+                  {filterVal === 'resolved' ? 'Resolved cases will appear here' : 'Student submissions will appear here in real time'}
+                </div>
               </div>
             ) : (
               <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: '0 6px' }}>
@@ -380,8 +393,26 @@ export default function Dashboard() {
                   📞 Call Student Now
                 </button>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  {[['✅ Resolve', markResolved], ['📝 Note', () => showToast('📝 Note saved')], ['🔴 Escalate', () => showToast('🔴 Escalated to admin')]].map(([label, fn]) => (
-                    <button key={label} onClick={fn} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, background: '#fef3f0', border: '1.5px solid #f0d8d8', color: '#7a5c5c', padding: 9, borderRadius: 11, fontFamily: 'DM Sans,sans-serif', fontSize: 13, cursor: 'pointer' }}>{label}</button>
+                  {[
+                    ['✅ Resolve', markResolved],
+                    ['📝 Note', () => showToast('📝 Note saved')],
+                    ['🔴 Escalate', () => showToast('🔴 Escalated to admin')]
+                  ].map(([label, fn]) => (
+                    <button
+                      key={label}
+                      onClick={fn}
+                      disabled={label === '✅ Resolve' && selected?.status === 'resolved'}
+                      style={{
+                        flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                        background: label === '✅ Resolve' && selected?.status === 'resolved' ? 'rgba(90,158,122,0.08)' : '#fef3f0',
+                        border: label === '✅ Resolve' && selected?.status === 'resolved' ? '1.5px solid rgba(90,158,122,0.3)' : '1.5px solid #f0d8d8',
+                        color: label === '✅ Resolve' && selected?.status === 'resolved' ? '#5a9e7a' : '#7a5c5c',
+                        padding: 9, borderRadius: 11, fontFamily: 'DM Sans,sans-serif', fontSize: 13,
+                        cursor: label === '✅ Resolve' && selected?.status === 'resolved' ? 'default' : 'pointer'
+                      }}
+                    >
+                      {label === '✅ Resolve' && selected?.status === 'resolved' ? '✅ Resolved' : label}
+                    </button>
                   ))}
                 </div>
               </div>
@@ -402,7 +433,7 @@ export default function Dashboard() {
                     <circle cx="50" cy="50" r="36" fill="none" stroke="#5a9e7a" strokeWidth="16" strokeDasharray="36 190" strokeDashoffset="-165" strokeLinecap="round"/>
                     <text x="50" y="53" textAnchor="middle" fontFamily="Playfair Display" fontSize="14" fontWeight="600" fill="#3d2c2c">{totalEntries}</text>
                   </svg>
-                  {[['#d4547a','Urgent', students.filter(s=>s.priority==='Urgent').length],['#e8804a','High',students.filter(s=>s.priority==='High').length],['#d4a054','Medium',students.filter(s=>s.priority==='Medium').length],['#5a9e7a','Low',students.filter(s=>s.priority==='Low').length]].map(([c,l,v]) => (
+                  {[['#d4547a','Urgent', students.filter(s=>s.priority==='Urgent'&&s.status!=='resolved').length],['#e8804a','High',students.filter(s=>s.priority==='High'&&s.status!=='resolved').length],['#d4a054','Medium',students.filter(s=>s.priority==='Medium'&&s.status!=='resolved').length],['#5a9e7a','Low',students.filter(s=>s.priority==='Low'&&s.status!=='resolved').length]].map(([c,l,v]) => (
                     <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, width: '100%' }}>
                       <div style={{ width: 8, height: 8, borderRadius: '50%', background: c, flexShrink: 0 }} />
                       <span style={{ flex: 1, color: '#7a5c5c' }}>{l}</span>
@@ -435,7 +466,6 @@ export default function Dashboard() {
 
             {!calling ? (
               <>
-                {/* PRE-CALL STATE */}
                 <div style={{ width: 72, height: 72, borderRadius: '50%', background: 'linear-gradient(135deg,#d4547a,#e8a0a0)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, margin: '0 auto 16px' }}>🌸</div>
                 <h3 style={{ fontFamily: 'Playfair Display,serif', fontSize: 20, fontWeight: 600, color: '#3d2c2c', textAlign: 'center', marginBottom: 4 }}>{selected?.name}</h3>
                 <p style={{ fontSize: 13, color: '#7a5c5c', textAlign: 'center', marginBottom: 20 }}>{selected?.topic}</p>
@@ -447,7 +477,6 @@ export default function Dashboard() {
                   </div>
                 ))}
 
-                {/* CALL BUTTON — opens phone dialer */}
                 <a
                   href={`tel:${selected?.phone?.replace(/\s+/g, '')}`}
                   onClick={() => { startCall() }}
@@ -471,7 +500,6 @@ export default function Dashboard() {
               </>
             ) : (
               <>
-                {/* IN-CALL STATE */}
                 <div style={{ textAlign: 'center' }}>
                   <div style={{ width: 72, height: 72, borderRadius: '50%', background: 'linear-gradient(135deg,#5a9e7a,#3d8a62)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, margin: '0 auto 16px', animation: 'glow-pulse 2s ease-in-out infinite' }}>📞</div>
                   <h3 style={{ fontFamily: 'Playfair Display,serif', fontSize: 20, fontWeight: 600, marginBottom: 4 }}>Call in Progress</h3>
