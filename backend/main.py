@@ -30,7 +30,6 @@ app.add_middleware(
 # ── FIREBASE ADMIN ──
 import firebase_admin
 from firebase_admin import credentials, firestore
-
 import json
 
 if not firebase_admin._apps:
@@ -41,7 +40,7 @@ if not firebase_admin._apps:
     else:
         cred = credentials.Certificate("serviceAccountKey.json")
     firebase_admin.initialize_app(cred)
-    
+
 db = firestore.client()
 
 # ── LOAD MODEL ON STARTUP ──
@@ -121,6 +120,7 @@ def send_email(request: EmailRequest):
     try:
         gmail_user = os.getenv("GMAIL_USER")
         gmail_password = os.getenv("GMAIL_APP_PASSWORD")
+        dashboard_url = os.getenv("DASHBOARD_URL", "http://localhost:3000")
 
         if not all([gmail_user, gmail_password]):
             raise HTTPException(
@@ -238,7 +238,7 @@ def send_email(request: EmailRequest):
 
         <!-- CTA Button -->
         <div style="text-align:center;margin-top:24px;">
-          <a href="http://localhost:3000/dashboard" style="display:inline-block;background:linear-gradient(135deg,#d4547a,#f0408a);color:#fff;text-decoration:none;padding:14px 36px;border-radius:100px;font-weight:500;font-size:15px;box-shadow:0 6px 24px rgba(212,84,122,0.35);">
+          <a href="{dashboard_url}/dashboard" style="display:inline-block;background:linear-gradient(135deg,#d4547a,#f0408a);color:#fff;text-decoration:none;padding:14px 36px;border-radius:100px;font-weight:500;font-size:15px;box-shadow:0 6px 24px rgba(212,84,122,0.35);">
             Open Dashboard →
           </a>
         </div>
@@ -277,7 +277,7 @@ AI Score: {request.score}/100
 What they shared:
 "{request.text}"
 
-Login to dashboard: http://localhost:3000/dashboard
+Login to dashboard: {dashboard_url}/dashboard
 
 — CampusCare AI System 🌸
 """
